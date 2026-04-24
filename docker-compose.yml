@@ -1,7 +1,7 @@
 version: '3.9'
 
 services:
-  # ─── PostgreSQL ─────────────────────────────────────────
+  # ─── PostgreSQL Database ────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: shopapp-postgres
@@ -21,12 +21,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
-  # ─── Redis ──────────────────────────────────────────────
+  # ─── Redis Cache ────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: shopapp-redis
     restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
     ports:
       - "6379:6379"
     networks:
@@ -37,12 +41,12 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── Backend (Only in "full" profile) ───────────────────
+  # ─── Spring Boot Backend ────────────────────────────────────────────────────
   backend:
-    profiles: ["full"]
     build:
       context: ./backend
       dockerfile: Dockerfile
+      target: runtime
     container_name: shopapp-backend
     restart: unless-stopped
     environment:
@@ -53,6 +57,8 @@ services:
       DB_PASSWORD: shoppass
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      JWT_SECRET: shopapp-super-secret-jwt-key-minimum-256-bits-for-hs256-algorithm
+      CORS_ORIGINS: http://localhost,http://localhost:3000,http://frontend
     ports:
       - "8080:8080"
     networks:
@@ -62,13 +68,19 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/api/categories || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
 
-  # ─── Frontend (Only in "full" profile) ──────────────────
+  # ─── React Frontend (Nginx) ─────────────────────────────────────────────────
   frontend:
-    profiles: ["full"]
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: runtime
     container_name: shopapp-frontend
     restart: unless-stopped
     ports:
@@ -76,10 +88,14 @@ services:
     networks:
       - shopapp-network
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
+    driver: local
 
 networks:
   shopapp-network:

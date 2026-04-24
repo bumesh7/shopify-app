@@ -1,0 +1,39 @@
+version: '3.9'
+
+# Development override - only spin up infrastructure (DB + Redis)
+# Run backend and frontend locally with hot-reload
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: shopapp-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shopapp
+      POSTGRES_USER: shopuser
+      POSTGRES_PASSWORD: shoppass
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopuser -d shopapp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: shopapp-redis-dev
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_dev_data:
+    driver: local
