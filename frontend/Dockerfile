@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Cache node_modules
 COPY package*.json ./
-RUN npm ci --silent
+RUN npm install --silent
 
 # Build app
 COPY public ./public
