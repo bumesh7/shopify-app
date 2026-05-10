@@ -10,7 +10,7 @@ A production-ready shopping application built with **Spring Boot** (Java 17) bac
 
 ## 🧰 Tech Stack
 
-| Layer       | Technology                              |
+| Layer       | Technology                               |
 |-------------|------------------------------------------|
 | Backend     | Java 17, Spring Boot 3.2, Spring Security |
 | Auth        | JWT (jjwt 0.12), BCrypt                  |
@@ -22,6 +22,172 @@ A production-ready shopping application built with **Spring Boot** (Java 17) bac
 | Container   | Docker, Docker Compose, Multi-stage builds |
 | CI/CD       | GitHub Actions (5 workflow files)        |
 | Security    | Trivy, GitHub Secret Scanning, Dependency Review |
+
+---
+
+## ⚙️ Repository Setup — Do This Before Your First Push
+
+> **These steps are mandatory. The pipeline will fail without them.**
+
+---
+
+### Step 1 — Create a Docker Hub Access Token
+
+Never use your Docker Hub password in GitHub Actions. Create a dedicated token:
+
+1. Log in to [hub.docker.com](https://hub.docker.com)
+2. Click your avatar (top-right) → **Account Settings**
+3. Go to **Security** → **New Access Token**
+4. Name it `github-actions-shopapp`
+5. Set permissions to **Read, Write, Delete**
+6. Click **Generate** → **copy the token immediately** (shown only once)
+
+---
+
+### Step 2 — Add Repository Secrets
+
+Go to your repo → **Settings** → **Secrets and variables** → **Actions** → **Secrets tab**
+
+Click **New repository secret** for each entry below:
+
+| Secret Name | Value | Why it's needed |
+|-------------|-------|-----------------|
+| `DOCKER_USERNAME` | `bumesh7` (your Docker Hub username) | Used to log in to Docker Hub |
+| `DOCKER_TOKEN` | `dckr_pat_xxxx...` (the token from Step 1) | Password for Docker Hub login — never use your real password |
+
+> ⚠️ Secret values are **encrypted and never shown again** after saving. If you lose one, delete and recreate it.
+
+---
+
+### Step 3 — Add Repository Variables
+
+Still on the **Actions** page → click the **Variables tab**
+
+Click **New repository variable** for each entry below:
+
+| Variable Name | Value | Why it's needed |
+|---------------|-------|-----------------|
+| `DOCKER_USERNAME` | `bumesh7` (your Docker Hub username) | Used to build image names like `bumesh7/shopapp-backend`. Variables (unlike secrets) can be used in `with:` input strings in reusable workflows |
+
+> ℹ️ **Why both a Secret and a Variable for the same username?**  
+> GitHub Actions does not allow secrets to be passed as `inputs:` to reusable workflows — only variables can be used there. The secret is used for login; the variable is used for the image name string.
+
+---
+
+### Step 4 — Create the Production Environment
+
+This adds a manual approval gate before any deploy runs:
+
+1. Repo → **Settings** → **Environments** → **New environment**
+2. Name it exactly: `production`
+3. Under **Deployment protection rules**, enable **Required reviewers**
+4. Add your GitHub username as a reviewer
+5. Click **Save protection rules**
+
+When a merge to `main` triggers the pipeline, the deploy job will **pause and email you** for approval after the security scan passes.
+
+---
+
+### Step 5 — Enable Secret Scanning (free, one click)
+
+This protects against accidentally committing API keys or passwords:
+
+1. Repo → **Settings** → **Security** → **Code security and analysis**
+2. Enable **Secret scanning** → detects secrets already in the repo
+3. Enable **Push protection** → **blocks the push** if a new secret is detected
+
+---
+
+### Step 6 — Verify Everything Is in Place
+
+Use this checklist before your first push to `main`:
+
+```
+GitHub → Settings → Secrets and variables → Actions
+
+  Secrets tab
+  ✅ DOCKER_USERNAME   = umesh4999
+  ✅ DOCKER_TOKEN      = dckr_pat_xxxxxxxxxxxxxxxxxxxx
+
+  Variables tab
+  ✅ DOCKER_USERNAME   = umesh4999
+
+GitHub → Settings → Environments
+  ✅ production        (Required reviewers enabled)
+
+GitHub → Settings → Security → Code security and analysis
+  ✅ Secret scanning   enabled
+  ✅ Push protection   enabled
+```
+
+---
+
+### What Happens If You Skip Any Step
+
+| Skipped step | What breaks | Error you'll see |
+|---|---|---|
+| `DOCKER_TOKEN` secret | Docker login fails | `unauthorized: incorrect username or password` |
+| `DOCKER_USERNAME` secret | Docker login fails | `unauthorized: incorrect username or password` |
+| `DOCKER_USERNAME` variable | Image name becomes `/shopapp-backend` | `invalid tag "/shopapp-backend:..."` |
+| `production` environment | Deploy job errors immediately | `Environment 'production' not found` |
+| Secret scanning | No protection — secrets can enter git history | (silent — no pipeline error, just a security risk) |
+
+---
+
+### Pipeline Overview
+
+```
+PR opened / updated
+──────────────────────────────────────────────────────────
+  Build & Test ──────────────▶ Dependency Review (CVE scan)
+       │                                 │
+       └──────────────┬──────────────────┘
+                      ▼
+              PR Comment (build + security status posted to PR)
+  ✅ No Docker images built or pushed on PRs
+
+Push to main
+──────────────────────────────────────────────────────────
+  Build & Test (Java 17 + Node 20)
+      │
+      ▼
+  Docker Build & Push  →  bumesh7/shopapp-backend:sha-<hash>
+                       →  umesh4999/shopapp-frontend:sha-<hash>
+                       →  :latest tags
+      │
+      ▼
+  🔒 Trivy Security Scan (fail on CRITICAL or HIGH CVEs)
+     Results uploaded to Security tab (SARIF)
+      │
+      ▼
+  Deploy → production  ← pauses for manual approval click
+
+Every 12 hours (+ manual trigger)
+──────────────────────────────────────────────────────────
+  🩺 Health Check
+  Pull :latest → start containers → curl endpoints → report
+```
+
+### Workflow Files
+
+| File | Trigger | Purpose |
+|------|---------|---------|
+| `reusable-build-test.yml` | `workflow_call` | Compile + build + test backend and frontend |
+| `reusable-docker.yml` | `workflow_call` | Build and push Docker images to Docker Hub |
+| `pr-pipeline.yml` | PR → `main` | Build + test + dependency CVE review + PR comment |
+| `main-pipeline.yml` | Push → `main` | Build → Docker → Trivy scan → deploy |
+| `health-check.yml` | Schedule + manual | Pull images, run containers, check health endpoints |
+
+### Security Layers (DevSecOps — Day 49)
+
+| Layer | Tool | What it catches |
+|-------|------|-----------------|
+| PR dependency check | `actions/dependency-review-action` | New packages with critical CVEs |
+| Docker image scan | `aquasecurity/trivy-action` | Vulnerable OS packages in image layers |
+| Secret detection | GitHub Secret Scanning (built-in) | API keys, tokens, passwords in commits |
+| Push protection | GitHub Push Protection (built-in) | Blocks the push if a secret is detected |
+| Least-privilege | Workflow `permissions:` blocks | Limits blast radius of compromised actions |
+| Pinned SHA actions | All `uses:` pinned to commit SHA | Protects against supply-chain tag tampering |
 
 ---
 
@@ -64,98 +230,19 @@ A production-ready shopping application built with **Spring Boot** (Java 17) bac
 
 ---
 
-## 🚀 CI/CD Pipeline (Day 48 & 49)
-
-This project includes a complete, production-style GitHub Actions pipeline that builds, tests, scans for security vulnerabilities, and deploys the application automatically.
-
-### Pipeline Overview
-
-```
-PR opened / updated
-──────────────────────────────────────────────────────────
-  Build & Test ──────────────▶ Dependency Review (CVE scan)
-       │                                 │
-       └──────────────┬──────────────────┘
-                      ▼
-              PR Comment (build + security status)
-  ✅ No Docker push on PRs
-
-Push to main
-──────────────────────────────────────────────────────────
-  Build & Test
-      │
-      ▼
-  Docker Build & Push (backend + frontend → Docker Hub)
-      │
-      ▼
-  🔒 Trivy Security Scan (fail on CRITICAL/HIGH CVEs)
-      │
-      ▼
-  Deploy → production  (requires manual approval)
-
-Every 12 hours
-──────────────────────────────────────────────────────────
-  🩺 Health Check (pull :latest → start containers → curl)
-```
-
-### Workflow Files
-
-| File | Trigger | Purpose |
-|------|---------|---------|
-| `reusable-build-test.yml` | `workflow_call` | Reusable: compile, build, test backend + frontend |
-| `reusable-docker.yml` | `workflow_call` | Reusable: build & push Docker images to Docker Hub |
-| `pr-pipeline.yml` | PR → `main` | Build + test + dependency CVE review → PR comment |
-| `main-pipeline.yml` | Push → `main` | Build → Docker → Trivy scan → deploy to production |
-| `health-check.yml` | Schedule + manual | Pull images, start containers, health-check endpoints |
-
-### Security (DevSecOps — Day 49)
-
-| Layer | Tool | What it catches |
-|-------|------|-----------------|
-| PR dependency check | `actions/dependency-review-action` | New packages with critical CVEs |
-| Docker image scan | `aquasecurity/trivy-action` | Vulnerable OS packages in image layers |
-| Secret detection | GitHub Secret Scanning (built-in) | API keys, tokens, passwords in commits |
-| Push protection | GitHub Push Protection (built-in) | Blocks push if a secret is detected |
-| Least-privilege | Workflow `permissions` blocks | Limits blast radius of compromised actions |
-| Pinned SHA actions | All actions pinned to commit SHA | Protects against supply-chain attacks |
-
-### Repository Secrets Required
-
-Set these in **Settings → Secrets and variables → Actions**:
-
-| Name | Type | Description |
-|------|------|-------------|
-| `DOCKER_USERNAME` | Secret | Docker Hub username |
-| `DOCKER_TOKEN` | Secret | Docker Hub access token (not your password) |
-| `DOCKER_USERNAME` | Variable (`vars.`) | Same value — used in image name strings |
-
-### Production Environment
-
-1. Go to **Settings → Environments → New environment** → name it `production`
-2. Enable **Required reviewers** and add yourself
-3. The `deploy` job in `main-pipeline.yml` will pause for manual approval before running
-
----
-
 ## 🗂️ Project Structure
 
 ```
 shopify-app/
 ├── .github/
 │   └── workflows/
-│       ├── reusable-build-test.yml   # Reusable: build + test
-│       ├── reusable-docker.yml       # Reusable: Docker build & push
-│       ├── pr-pipeline.yml           # PR checks (no Docker push)
-│       ├── main-pipeline.yml         # Full pipeline with security scan
-│       └── health-check.yml          # Scheduled container health check
+│       ├── reusable-build-test.yml
+│       ├── reusable-docker.yml
+│       ├── pr-pipeline.yml
+│       ├── main-pipeline.yml
+│       └── health-check.yml
 │
-├── 2026/
-│   ├── day-48/
-│   │   └── day-48-actions-project.md
-│   └── day-49/
-│       └── day-49-devsecops.md
-│
-├── backend/                        # Spring Boot API
+├── backend/
 │   ├── src/main/java/com/shopapp/
 │   │   ├── config/
 │   │   ├── controller/
@@ -168,7 +255,7 @@ shopify-app/
 │   ├── Dockerfile
 │   └── pom.xml
 │
-├── frontend/                       # React SPA
+├── frontend/
 │   ├── src/
 │   │   ├── components/
 │   │   ├── context/
@@ -204,6 +291,8 @@ docker compose up --build
 # Backend API: http://localhost:8080/api
 ```
 
+> ⏳ First build takes ~3–5 minutes. Subsequent starts are fast.
+
 ### Local Development (Hot Reload)
 
 ```bash
@@ -227,57 +316,59 @@ cd frontend && npm install && npm start
 
 ## 🔑 Demo Credentials
 
-| Role  | Email                | Password  |
-|-------|----------------------|-----------|
-| Admin | admin@shopapp.com    | admin123  |
-| User  | user@shopapp.com     | user123   |
+| Role  | Email             | Password |
+|-------|-------------------|----------|
+| Admin | admin@shopapp.com | admin123 |
+| User  | user@shopapp.com  | user123  |
+
+Seeded automatically on first startup by `DataInitializer.java`.
 
 ---
 
 ## 🌐 API Endpoints
 
 ### Auth
-| Method | Endpoint             | Auth     | Description        |
-|--------|----------------------|----------|--------------------|
-| POST   | /api/auth/register   | Public   | Register new user  |
-| POST   | /api/auth/login      | Public   | Login, get JWT     |
+| Method | Endpoint           | Auth   | Description       |
+|--------|--------------------|--------|-------------------|
+| POST   | /api/auth/register | Public | Register new user |
+| POST   | /api/auth/login    | Public | Login, get JWT    |
 
 ### Products
-| Method | Endpoint                     | Auth     | Description              |
-|--------|------------------------------|----------|--------------------------|
-| GET    | /api/products                | Public   | List (paginated, filter) |
-| GET    | /api/products/:id            | Public   | Product detail           |
-| GET    | /api/products/featured       | Public   | Featured list            |
-| GET    | /api/products/search?q=      | Public   | Full-text search         |
-| GET    | /api/categories              | Public   | All categories           |
-| POST   | /api/admin/products          | ADMIN    | Create product           |
-| PUT    | /api/admin/products/:id      | ADMIN    | Update product           |
-| DELETE | /api/admin/products/:id      | ADMIN    | Soft-delete product      |
+| Method | Endpoint                | Auth  | Description              |
+|--------|-------------------------|-------|--------------------------|
+| GET    | /api/products           | Public | List (paginated, filter) |
+| GET    | /api/products/:id       | Public | Product detail           |
+| GET    | /api/products/featured  | Public | Featured list            |
+| GET    | /api/products/search?q= | Public | Full-text search         |
+| GET    | /api/categories         | Public | All categories           |
+| POST   | /api/admin/products     | ADMIN  | Create product           |
+| PUT    | /api/admin/products/:id | ADMIN  | Update product           |
+| DELETE | /api/admin/products/:id | ADMIN  | Soft-delete product      |
 
 ### Cart
-| Method | Endpoint             | Auth | Description         |
-|--------|----------------------|------|---------------------|
-| GET    | /api/cart            | User | Get cart summary    |
-| POST   | /api/cart            | User | Add item            |
-| PUT    | /api/cart/:itemId    | User | Update quantity     |
-| DELETE | /api/cart/:itemId    | User | Remove item         |
-| DELETE | /api/cart            | User | Clear cart          |
+| Method | Endpoint          | Auth | Description      |
+|--------|-------------------|------|------------------|
+| GET    | /api/cart         | User | Get cart summary |
+| POST   | /api/cart         | User | Add item         |
+| PUT    | /api/cart/:itemId | User | Update quantity  |
+| DELETE | /api/cart/:itemId | User | Remove item      |
+| DELETE | /api/cart         | User | Clear cart       |
 
 ### Orders
-| Method | Endpoint                         | Auth  | Description       |
-|--------|----------------------------------|-------|-------------------|
-| POST   | /api/orders                      | User  | Place order       |
-| GET    | /api/orders                      | User  | My orders         |
-| GET    | /api/orders/:orderNumber         | User  | Order detail      |
-| PUT    | /api/orders/admin/:id/status     | ADMIN | Update status     |
+| Method | Endpoint                     | Auth  | Description     |
+|--------|------------------------------|-------|-----------------|
+| POST   | /api/orders                  | User  | Place order     |
+| GET    | /api/orders                  | User  | My orders       |
+| GET    | /api/orders/:orderNumber     | User  | Order detail    |
+| PUT    | /api/orders/admin/:id/status | ADMIN | Update status   |
 
 ### Addresses
-| Method | Endpoint              | Auth | Description      |
-|--------|-----------------------|------|------------------|
-| GET    | /api/addresses        | User | List addresses   |
-| POST   | /api/addresses        | User | Add address      |
-| PUT    | /api/addresses/:id    | User | Update address   |
-| DELETE | /api/addresses/:id    | User | Delete address   |
+| Method | Endpoint           | Auth | Description    |
+|--------|--------------------|------|----------------|
+| GET    | /api/addresses     | User | List addresses |
+| POST   | /api/addresses     | User | Add address    |
+| PUT    | /api/addresses/:id | User | Update address |
+| DELETE | /api/addresses/:id | User | Delete address |
 
 ---
 
@@ -286,55 +377,55 @@ cd frontend && npm install && npm start
 ### Multi-Stage Builds
 
 **Backend** (`backend/Dockerfile`)
-1. **Stage `builder`** — `maven:3.9.5-eclipse-temurin-17`: compiles and packages JAR
-2. **Stage `runtime`** — `eclipse-temurin:17-jre-alpine`: minimal JRE, non-root user
+1. `maven:3.9.5-eclipse-temurin-17` — compiles and packages JAR
+2. `eclipse-temurin:17-jre-alpine` — minimal JRE, runs as non-root user
 
 **Frontend** (`frontend/Dockerfile`)
-1. **Stage `builder`** — `node:20-alpine`: installs deps, runs `npm run build`
-2. **Stage `runtime`** — `nginx:1.25-alpine`: serves static build, proxies `/api/*`
+1. `node:20-alpine` — installs deps, runs `npm run build`
+2. `nginx:1.25-alpine` — serves static build, proxies `/api/*` to backend
 
-### Services in `docker-compose.yml`
-| Service   | Port | Role                  |
-|-----------|------|-----------------------|
-| postgres  | 5432 | Primary database      |
-| redis     | 6379 | Cache + session store |
-| backend   | 8080 | Spring Boot REST API  |
-| frontend  | 80   | Nginx + React SPA     |
+### Services
+| Service  | Port | Role                  |
+|----------|------|-----------------------|
+| postgres | 5432 | Primary database      |
+| redis    | 6379 | Cache + session store |
+| backend  | 8080 | Spring Boot REST API  |
+| frontend | 80   | Nginx + React SPA     |
 
 ---
 
 ## ⚙️ Environment Variables
 
-| Variable     | Default       | Description          |
-|--------------|---------------|----------------------|
-| DB_HOST      | localhost     | PostgreSQL host      |
-| DB_PORT      | 5432          | PostgreSQL port      |
-| DB_NAME      | shopapp       | Database name        |
-| DB_USER      | shopuser      | DB username          |
-| DB_PASSWORD  | shoppass      | DB password          |
-| REDIS_HOST   | localhost     | Redis host           |
-| REDIS_PORT   | 6379          | Redis port           |
-| JWT_SECRET   | (see compose) | JWT signing key      |
-| CORS_ORIGINS | localhost:3000 | Allowed CORS origins |
+| Variable     | Default        | Description           |
+|--------------|----------------|-----------------------|
+| DB_HOST      | localhost      | PostgreSQL host       |
+| DB_PORT      | 5432           | PostgreSQL port       |
+| DB_NAME      | shopapp        | Database name         |
+| DB_USER      | shopuser       | DB username           |
+| DB_PASSWORD  | shoppass       | DB password           |
+| REDIS_HOST   | localhost      | Redis host            |
+| REDIS_PORT   | 6379           | Redis port            |
+| JWT_SECRET   | (see compose)  | JWT signing key       |
+| CORS_ORIGINS | localhost:3000 | Allowed CORS origins  |
 
 ---
 
 ## 🛑 Cleanup
 
 ```bash
-docker compose down          # Stop
-docker compose down -v       # Stop + wipe data
-docker compose down --rmi all # Stop + remove images
+docker compose down           # Stop services
+docker compose down -v        # Stop + wipe all data volumes
+docker compose down --rmi all # Stop + remove all built images
 ```
 
 ---
 
 ## 📝 Notes
 
-- Schema is auto-created by Hibernate on first run.
-- Seed data (users + products) is inserted by `DataInitializer.java` if tables are empty.
-- Redis cache TTL is 10 minutes for product listings.
-- For production: rotate `JWT_SECRET`, `DB_PASSWORD`, disable `show-sql`.
+- Schema is auto-created by Hibernate (`ddl-auto: update`) on first run
+- Seed data is inserted by `DataInitializer.java` only when tables are empty
+- Redis cache TTL is 10 minutes for product listings
+- For production: rotate `JWT_SECRET`, `DB_PASSWORD`, and disable `show-sql`
 
 ---
 
