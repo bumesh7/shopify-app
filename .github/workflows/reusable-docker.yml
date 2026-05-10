@@ -34,7 +34,7 @@ jobs:
           echo "User: ${{ secrets.docker_username }}"
           echo "Backend: ${{ inputs.backend_image_name }}"
 
-      # ✅ Login
+      # Login
       - name: Login Docker Hub
         uses: docker/login-action@v2
         with:

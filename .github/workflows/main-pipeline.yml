@@ -78,7 +78,7 @@ jobs:
         run: |
           if grep -q '"level":"error"' trivy-backend.sarif 2>/dev/null || \
              grep -q '"level":"error"' trivy-frontend.sarif 2>/dev/null; then
-            echo "❌ Critical vulnerabilities found"
+            echo "Critical vulnerabilities found"
             exit 1
           fi
 
@@ -86,5 +86,5 @@ jobs:
     needs: security-scan
     runs-on: ubuntu-latest
     steps:
-      - run: echo "🚀 Deploy step"
+      - run: echo "Deploy step"
 

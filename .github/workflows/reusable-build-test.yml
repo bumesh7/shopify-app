@@ -92,12 +92,12 @@ jobs:
 
           if [[ "${{ inputs.run_tests }}" == "true" ]]; then
             echo "test_result=skipped" >> "$GITHUB_OUTPUT"
-            echo "✅ Tests skipped (run_tests=false)"
+            echo "Tests skipped (run_tests=false)"
           elif [[ "$BACKEND_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" ]]; then
             echo "test_result=failed" >> "$GITHUB_OUTPUT"
-            echo "❌ One or more test suites failed"
+            echo "One or more test suites failed"
             exit 1
           else
             echo "test_result=passed" >> "$GITHUB_OUTPUT"
-            echo "✅ All tests passed"
+            echo "All tests passed"
           fi
