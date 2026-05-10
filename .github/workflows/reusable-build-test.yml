@@ -87,10 +87,10 @@ jobs:
       - name: Determine test result
         id: set-result
         run: |
-          BACKEND_RESULT="${{ steps.backend-test.outcome }}"
-          FRONTEND_RESULT="${{ steps.frontend-test.outcome }}"
+          BACKEND_RESULT="${{ steps.backend-test.conclusion }}"
+          FRONTEND_RESULT="${{ steps.frontend-test.conslusion }}"
 
-          if [[ "${{ inputs.run_tests }}" == "false" ]]; then
+          if [[ "${{ inputs.run_tests }}" == "true" ]]; then
             echo "test_result=skipped" >> "$GITHUB_OUTPUT"
             echo "✅ Tests skipped (run_tests=false)"
           elif [[ "$BACKEND_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" ]]; then
