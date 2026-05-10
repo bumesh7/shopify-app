@@ -12,9 +12,6 @@ on:
       tag:
         required: true
         type: string
-      docker_username:
-        required: true
-        type: string
     secrets:
       docker_username:
         required: true
@@ -34,18 +31,20 @@ jobs:
 
       - name: Debug
         run: |
-          echo "User: ${{ inputs.docker_username }}"
+          echo "User: ${{ secrets.docker_username }}"
           echo "Backend: ${{ inputs.backend_image_name }}"
 
+      # ✅ Login
       - name: Login Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.docker_username }}
           password: ${{ secrets.docker_token }}
 
-      # BACKEND
+      # ================= BACKEND =================
       - id: meta_backend
-        run: echo "image=${{ inputs.docker_username }}/${{ inputs.backend_image_name }}:${{ inputs.tag }}" >> $GITHUB_OUTPUT
+        run: |
+          echo "image=${{ secrets.docker_username }}/${{ inputs.backend_image_name }}:${{ inputs.tag }}" >> $GITHUB_OUTPUT
 
       - name: Build backend
         uses: docker/build-push-action@v5
@@ -53,12 +52,13 @@ jobs:
           context: ./backend
           push: true
           tags: |
-            ${{ inputs.docker_username }}/${{ inputs.backend_image_name }}:${{ inputs.tag }}
-            ${{ inputs.docker_username }}/${{ inputs.backend_image_name }}:latest
+            ${{ secrets.docker_username }}/${{ inputs.backend_image_name }}:${{ inputs.tag }}
+            ${{ secrets.docker_username }}/${{ inputs.backend_image_name }}:latest
 
-      # FRONTEND
+      # ================= FRONTEND =================
       - id: meta_frontend
-        run: echo "image=${{ inputs.docker_username }}/${{ inputs.frontend_image_name }}:${{ inputs.tag }}" >> $GITHUB_OUTPUT
+        run: |
+          echo "image=${{ secrets.docker_username }}/${{ inputs.frontend_image_name }}:${{ inputs.tag }}" >> $GITHUB_OUTPUT
 
       - name: Build frontend
         uses: docker/build-push-action@v5
@@ -66,5 +66,5 @@ jobs:
           context: ./frontend
           push: true
           tags: |
-            ${{ inputs.docker_username }}/${{ inputs.frontend_image_name }}:${{ inputs.tag }}
-            ${{ inputs.docker_username }}/${{ inputs.frontend_image_name }}:latest
+            ${{ secrets.docker_username }}/${{ inputs.frontend_image_name }}:${{ inputs.tag }}
+            ${{ secrets.docker_username }}/${{ inputs.frontend_image_name }}:latest
