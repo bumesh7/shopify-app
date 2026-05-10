@@ -1,83 +1,94 @@
-name: Reusable Docker Build & Push
+name: Main Pipeline
 
 on:
-  workflow_call:
-    inputs:
-      backend_image_name:
-        required: true
-        type: string
-      frontend_image_name:
-        required: true
-        type: string
-      tag:
-        required: true
-        type: string
-    secrets:
-      docker_username:
-        required: true
-      docker_token:
-        required: true
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
 
 jobs:
+  build-test:
+    uses: ./.github/workflows/reusable-build-test.yml
+    with:
+      java_version: "17"
+      node_version: "20"
+      run_tests: true
+
   docker:
+    needs: build-test
+    uses: ./.github/workflows/reusable-docker.yml
+    with:
+      backend_image_name:  ${{ secrets.DOCKER_USERNAME }}/shopapp-backend
+      frontend_image_name: ${{ secrets.DOCKER_USERNAME }}/shopapp-frontend
+      tag: sha-${{ github.sha }}
+    secrets:
+      docker_username: ${{ secrets.DOCKER_USERNAME }}
+      docker_token:    ${{ secrets.DOCKER_TOKEN }}
+
+  security-scan:
+    needs: docker
     runs-on: ubuntu-latest
 
-    outputs:
-      backend_image_url: ${{ steps.meta_backend.outputs.image }}
-      frontend_image_url: ${{ steps.meta_frontend.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Short SHA
+        id: sha
+        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      # ✅ BACKEND SCAN
+      - name: Scan backend
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $(pwd):/workspace \
+            aquasec/trivy image \
+            --format sarif \
+            --output /workspace/trivy-backend.sarif \
+            --severity CRITICAL,HIGH \
+            ${{ secrets.DOCKER_USERNAME }}/shopapp-backend:sha-${{ steps.sha.outputs.short }}
+
+      # ✅ FRONTEND SCAN
+      - name: Scan frontend
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $(pwd):/workspace \
+            aquasec/trivy image \
+            --format sarif \
+            --output /workspace/trivy-frontend.sarif \
+            --severity CRITICAL,HIGH \
+            ${{ secrets.DOCKER_USERNAME }}/shopapp-frontend:sha-${{ steps.sha.outputs.short }}
+
+      # ✅ SAFE UPLOAD
+      - name: Upload backend report
+        if: always() && hashFiles('trivy-backend.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-backend.sarif
+
+      - name: Upload frontend report
+        if: always() && hashFiles('trivy-frontend.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-frontend.sarif
+
+      # ✅ FAIL CONTROLLED
+      - name: Fail if critical issues found
+        run: |
+          if grep -q '"level":"error"' trivy-backend.sarif 2>/dev/null || \
+             grep -q '"level":"error"' trivy-frontend.sarif 2>/dev/null; then
+            echo "❌ Critical vulnerabilities found"
+            exit 1
+          fi
+
+  deploy:
+    needs: security-scan
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # ✅ Debug (helps catch your original issue)
-      - name: Debug image names
-        run: |
-          echo "Backend image: ${{ inputs.backend_image_name }}"
-          echo "Frontend image: ${{ inputs.frontend_image_name }}"
-          echo "Tag: ${{ inputs.tag }}"
-
-      # ✅ Login to Docker Hub
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.docker_username }}
-          password: ${{ secrets.docker_token }}
-
-      # ================= BACKEND =================
-      - name: Set backend image metadata
-        id: meta_backend
-        run: |
-          IMAGE="${{ inputs.backend_image_name }}:${{ inputs.tag }}"
-          echo "image=$IMAGE" >> $GITHUB_OUTPUT
-
-      - name: Build & Push Backend Image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          push: true
-          tags: |
-            ${{ inputs.backend_image_name }}:${{ inputs.tag }}
-            ${{ inputs.backend_image_name }}:latest
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
-
-      # ================= FRONTEND =================
-      - name: Set frontend image metadata
-        id: meta_frontend
-        run: |
-          IMAGE="${{ inputs.frontend_image_name }}:${{ inputs.tag }}"
-          echo "image=$IMAGE" >> $GITHUB_OUTPUT
-
-      - name: Build & Push Frontend Image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
-          push: true
-          tags: |
-            ${{ inputs.frontend_image_name }}:${{ inputs.tag }}
-            ${{ inputs.frontend_image_name }}:latest
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,mode=max,scope=frontend
+      - run: echo "🚀 Deploy step (placeholder)"

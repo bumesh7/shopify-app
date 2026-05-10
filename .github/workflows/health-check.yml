@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      BACKEND_IMAGE:  ${{ vars.DOCKER_USERNAME }}/shopapp-backend:latest
-      FRONTEND_IMAGE: ${{ vars.DOCKER_USERNAME }}/shopapp-frontend:latest
+      BACKEND_IMAGE:  ${{ secrets.DOCKER_USERNAME }}/shopapp-backend:latest
+      FRONTEND_IMAGE: ${{ secrets.DOCKER_USERNAME }}/shopapp-frontend:latest
       BACKEND_PORT:   "8080"
       FRONTEND_PORT:  "8081"
 
