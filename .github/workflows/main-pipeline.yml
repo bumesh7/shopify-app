@@ -1,0 +1,134 @@
+name: Main Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Job 1: Build & Test ────────────────────────────────────────────────────
+  build-test:
+    name: Build & Test
+    uses: ./.github/workflows/reusable-build-test.yml
+    with:
+      java_version: "17"
+      node_version: "20"
+      run_tests: true
+
+  # ── Job 2: Docker Build & Push ─────────────────────────────────────────────
+  docker:
+    name: Docker Build & Push
+    needs: build-test
+    uses: ./.github/workflows/reusable-docker.yml
+    with:
+      backend_image_name:  ${{ vars.DOCKER_USERNAME }}/shopapp-backend
+      frontend_image_name: ${{ vars.DOCKER_USERNAME }}/shopapp-frontend
+      tag: sha-${{ github.sha && github.sha || 'latest' }}
+    secrets:
+      docker_username: ${{ secrets.DOCKER_USERNAME }}
+      docker_token:    ${{ secrets.DOCKER_TOKEN }}
+
+  # ── Job 3: Trivy Security Scan (Day 49) ───────────────────────────────────
+  security-scan:
+    name: Trivy Image Security Scan
+    needs: docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Derive short SHA
+        id: sha
+        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - name: Scan backend image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ vars.DOCKER_USERNAME }}/shopapp-backend:sha-${{ steps.sha.outputs.short }}
+          format: sarif
+          output: trivy-backend.sarif
+          exit-code: "1"
+          severity: "CRITICAL,HIGH"
+          ignore-unfixed: true
+
+      - name: Scan frontend image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ vars.DOCKER_USERNAME }}/shopapp-frontend:sha-${{ steps.sha.outputs.short }}
+          format: sarif
+          output: trivy-frontend.sarif
+          exit-code: "1"
+          severity: "CRITICAL,HIGH"
+          ignore-unfixed: true
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@1b1aada464948af03b950897e5eb522f92603cc2 # v3.24.9
+        with:
+          sarif_file: trivy-backend.sarif
+          category: trivy-backend
+
+      - name: Upload frontend scan results
+        if: always()
+        uses: github/codeql-action/upload-sarif@1b1aada464948af03b950897e5eb522f92603cc2 # v3.24.9
+        with:
+          sarif_file: trivy-frontend.sarif
+          category: trivy-frontend
+
+      - name: Upload scan reports as artifacts
+        if: always()
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: trivy-scan-results-${{ steps.sha.outputs.short }}
+          path: |
+            trivy-backend.sarif
+            trivy-frontend.sarif
+          retention-days: 30
+
+  # ── Job 4: Deploy to Production ───────────────────────────────────────────
+  deploy:
+    name: Deploy to Production
+    needs: security-scan
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+      - name: Derive short SHA
+        id: sha
+        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy backend image
+        run: |
+          echo "🚀 Deploying backend image:"
+          echo "   ${{ needs.docker.outputs.backend_image_url }}"
+          echo ""
+          echo "   (In a real pipeline this step would SSH into your server,"
+          echo "    run docker pull + docker compose up, or trigger a k8s rollout.)"
+
+      - name: Deploy frontend image
+        run: |
+          echo "🚀 Deploying frontend image:"
+          echo "   ${{ needs.docker.outputs.frontend_image_url }}"
+
+      - name: Write deployment step summary
+        run: |
+          SHORT="${{ steps.sha.outputs.short }}"
+          echo "## 🚀 Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Service  | Image |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Backend  | \`${{ needs.docker.outputs.backend_image_url }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Frontend | \`${{ needs.docker.outputs.frontend_image_url }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Commit:** \`${SHORT}\`  **Environment:** \`production\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "✅ Deployment complete — $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_STEP_SUMMARY"

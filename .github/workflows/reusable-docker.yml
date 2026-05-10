@@ -1,0 +1,92 @@
+name: Reusable — Docker Build & Push
+
+on:
+  workflow_call:
+    inputs:
+      backend_image_name:
+        description: "Docker Hub image name for backend (e.g. username/shopapp-backend)"
+        type: string
+        required: true
+      frontend_image_name:
+        description: "Docker Hub image name for frontend (e.g. username/shopapp-frontend)"
+        type: string
+        required: true
+      tag:
+        description: "Primary tag to apply (e.g. latest or sha-abc1234)"
+        type: string
+        required: true
+    secrets:
+      docker_username:
+        required: true
+      docker_token:
+        required: true
+    outputs:
+      backend_image_url:
+        description: "Full backend image reference pushed to Docker Hub"
+        value: ${{ jobs.docker-build-push.outputs.backend_image_url }}
+      frontend_image_url:
+        description: "Full frontend image reference pushed to Docker Hub"
+        value: ${{ jobs.docker-build-push.outputs.frontend_image_url }}
+
+permissions:
+  contents: read
+
+jobs:
+  docker-build-push:
+    name: Docker Build & Push (${{ inputs.tag }})
+    runs-on: ubuntu-latest
+
+    outputs:
+      backend_image_url: ${{ steps.set-outputs.outputs.backend_image_url }}
+      frontend_image_url: ${{ steps.set-outputs.outputs.frontend_image_url }}
+
+    steps:
+      # ── Checkout ───────────────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      # ── Docker Buildx ─────────────────────────────────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
+
+      # ── Login ─────────────────────────────────────────────────────────────────
+      - name: Log in to Docker Hub
+        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
+        with:
+          username: ${{ secrets.docker_username }}
+          password: ${{ secrets.docker_token }}
+
+      # ── Backend ───────────────────────────────────────────────────────────────
+      - name: Build & push backend image
+        uses: docker/build-push-action@4a13e500e55cf31b7a5d59a38ab2040ab0f42f56 # v5.1.0
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ inputs.backend_image_name }}:${{ inputs.tag }}
+            ${{ inputs.backend_image_name }}:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      # ── Frontend ──────────────────────────────────────────────────────────────
+      - name: Build & push frontend image
+        uses: docker/build-push-action@4a13e500e55cf31b7a5d59a38ab2040ab0f42f56 # v5.1.0
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ inputs.frontend_image_name }}:${{ inputs.tag }}
+            ${{ inputs.frontend_image_name }}:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      # ── Outputs ───────────────────────────────────────────────────────────────
+      - name: Set image URL outputs
+        id: set-outputs
+        run: |
+          echo "backend_image_url=${{ inputs.backend_image_name }}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          echo "frontend_image_url=${{ inputs.frontend_image_name }}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          echo "✅ Backend  → ${{ inputs.backend_image_name }}:${{ inputs.tag }}"
+          echo "✅ Frontend → ${{ inputs.frontend_image_name }}:${{ inputs.tag }}"

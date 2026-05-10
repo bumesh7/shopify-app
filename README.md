@@ -1,5 +1,9 @@
 # 🛍️ ShopApp — Full-Stack E-Commerce Application
 
+[![PR Pipeline](https://github.com/bumesh7/shopify-app/actions/workflows/pr-pipeline.yml/badge.svg)](https://github.com/bumesh7/shopify-app/actions/workflows/pr-pipeline.yml)
+[![Main Pipeline](https://github.com/bumesh7/shopify-app/actions/workflows/main-pipeline.yml/badge.svg)](https://github.com/bumesh7/shopify-app/actions/workflows/main-pipeline.yml)
+[![Health Check](https://github.com/bumesh7/shopify-app/actions/workflows/health-check.yml/badge.svg)](https://github.com/bumesh7/shopify-app/actions/workflows/health-check.yml)
+
 A production-ready shopping application built with **Spring Boot** (Java 17) backend, **React** frontend, **PostgreSQL** database, and **Redis** caching — fully containerized with Docker and Docker Compose.
 
 ---
@@ -16,6 +20,8 @@ A production-ready shopping application built with **Spring Boot** (Java 17) bac
 | Styling     | Custom CSS with CSS Variables (no UI lib)|
 | Web Server  | Nginx 1.25 (reverse proxy + static)      |
 | Container   | Docker, Docker Compose, Multi-stage builds |
+| CI/CD       | GitHub Actions (5 workflow files)        |
+| Security    | Trivy, GitHub Secret Scanning, Dependency Review |
 
 ---
 
@@ -58,43 +64,126 @@ A production-ready shopping application built with **Spring Boot** (Java 17) bac
 
 ---
 
+## 🚀 CI/CD Pipeline (Day 48 & 49)
+
+This project includes a complete, production-style GitHub Actions pipeline that builds, tests, scans for security vulnerabilities, and deploys the application automatically.
+
+### Pipeline Overview
+
+```
+PR opened / updated
+──────────────────────────────────────────────────────────
+  Build & Test ──────────────▶ Dependency Review (CVE scan)
+       │                                 │
+       └──────────────┬──────────────────┘
+                      ▼
+              PR Comment (build + security status)
+  ✅ No Docker push on PRs
+
+Push to main
+──────────────────────────────────────────────────────────
+  Build & Test
+      │
+      ▼
+  Docker Build & Push (backend + frontend → Docker Hub)
+      │
+      ▼
+  🔒 Trivy Security Scan (fail on CRITICAL/HIGH CVEs)
+      │
+      ▼
+  Deploy → production  (requires manual approval)
+
+Every 12 hours
+──────────────────────────────────────────────────────────
+  🩺 Health Check (pull :latest → start containers → curl)
+```
+
+### Workflow Files
+
+| File | Trigger | Purpose |
+|------|---------|---------|
+| `reusable-build-test.yml` | `workflow_call` | Reusable: compile, build, test backend + frontend |
+| `reusable-docker.yml` | `workflow_call` | Reusable: build & push Docker images to Docker Hub |
+| `pr-pipeline.yml` | PR → `main` | Build + test + dependency CVE review → PR comment |
+| `main-pipeline.yml` | Push → `main` | Build → Docker → Trivy scan → deploy to production |
+| `health-check.yml` | Schedule + manual | Pull images, start containers, health-check endpoints |
+
+### Security (DevSecOps — Day 49)
+
+| Layer | Tool | What it catches |
+|-------|------|-----------------|
+| PR dependency check | `actions/dependency-review-action` | New packages with critical CVEs |
+| Docker image scan | `aquasecurity/trivy-action` | Vulnerable OS packages in image layers |
+| Secret detection | GitHub Secret Scanning (built-in) | API keys, tokens, passwords in commits |
+| Push protection | GitHub Push Protection (built-in) | Blocks push if a secret is detected |
+| Least-privilege | Workflow `permissions` blocks | Limits blast radius of compromised actions |
+| Pinned SHA actions | All actions pinned to commit SHA | Protects against supply-chain attacks |
+
+### Repository Secrets Required
+
+Set these in **Settings → Secrets and variables → Actions**:
+
+| Name | Type | Description |
+|------|------|-------------|
+| `DOCKER_USERNAME` | Secret | Docker Hub username |
+| `DOCKER_TOKEN` | Secret | Docker Hub access token (not your password) |
+| `DOCKER_USERNAME` | Variable (`vars.`) | Same value — used in image name strings |
+
+### Production Environment
+
+1. Go to **Settings → Environments → New environment** → name it `production`
+2. Enable **Required reviewers** and add yourself
+3. The `deploy` job in `main-pipeline.yml` will pause for manual approval before running
+
+---
+
 ## 🗂️ Project Structure
 
 ```
 shopify-app/
+├── .github/
+│   └── workflows/
+│       ├── reusable-build-test.yml   # Reusable: build + test
+│       ├── reusable-docker.yml       # Reusable: Docker build & push
+│       ├── pr-pipeline.yml           # PR checks (no Docker push)
+│       ├── main-pipeline.yml         # Full pipeline with security scan
+│       └── health-check.yml          # Scheduled container health check
+│
+├── 2026/
+│   ├── day-48/
+│   │   └── day-48-actions-project.md
+│   └── day-49/
+│       └── day-49-devsecops.md
+│
 ├── backend/                        # Spring Boot API
 │   ├── src/main/java/com/shopapp/
-│   │   ├── config/                 # Security, Redis, DataInitializer
-│   │   ├── controller/             # REST controllers
-│   │   ├── dto/                    # Request/Response DTOs
-│   │   ├── model/                  # JPA entities
-│   │   ├── repository/             # Spring Data JPA repos
-│   │   ├── security/               # JWT filter, UserDetailsService
-│   │   └── service/                # Business logic
-│   ├── src/main/resources/
-│   │   └── application.yml
-│   ├── Dockerfile                  # Multi-stage (Maven build + JRE runtime)
+│   │   ├── config/
+│   │   ├── controller/
+│   │   ├── dto/
+│   │   ├── model/
+│   │   ├── repository/
+│   │   ├── security/
+│   │   └── service/
+│   ├── src/main/resources/application.yml
+│   ├── Dockerfile
 │   └── pom.xml
 │
 ├── frontend/                       # React SPA
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── layout/             # Navbar, Footer
-│   │   │   └── shop/               # ProductCard
-│   │   ├── context/                # Auth, Cart, Theme contexts
-│   │   ├── pages/                  # Home, Shop, ProductDetail, Cart,
-│   │   │                           # Checkout, Auth, Orders, Admin
-│   │   ├── styles/global.css       # Full design system (dark+light)
-│   │   ├── utils/api.js            # Axios instance with interceptors
-│   │   ├── App.js                  # Routes
+│   │   ├── context/
+│   │   ├── pages/
+│   │   ├── styles/global.css
+│   │   ├── utils/api.js
+│   │   ├── App.js
 │   │   └── index.js
 │   ├── public/index.html
-│   ├── nginx/nginx.conf            # Reverse proxy + SPA fallback
-│   ├── Dockerfile                  # Multi-stage (Node build + Nginx)
+│   ├── nginx/nginx.conf
+│   ├── Dockerfile
 │   └── package.json
 │
-├── docker-compose.yml              # Production (all 4 services)
-├── docker-compose.dev.yml          # Dev (DB + Redis only)
+├── docker-compose.yml
+├── docker-compose.dev.yml
 └── README.md
 ```
 
@@ -106,55 +195,32 @@ shopify-app/
 - [Docker](https://docs.docker.com/get-docker/) 24+
 - [Docker Compose](https://docs.docker.com/compose/) v2+
 
----
-
-### ▶️ Option 1 — Run Everything with Docker Compose (Recommended)
+### Run Everything with Docker Compose
 
 ```bash
-# 1. Clone / extract the project
 cd shopify-app
-
-# 2. Build and start all services
 docker compose up --build
-
-# 3. Open in browser
-#    Frontend:  http://localhost
-#    Backend API: http://localhost:8080/api
+# Frontend:    http://localhost
+# Backend API: http://localhost:8080/api
 ```
 
-> ⏳ First build takes ~3–5 minutes (Maven downloads dependencies, npm builds React).  
-> Subsequent starts are fast.
+### Local Development (Hot Reload)
 
----
-
-### ▶️ Option 2 — Local Development (Hot Reload)
-
-**Step 1 — Start only infrastructure**
 ```bash
+# Step 1 — infrastructure only
 docker compose -f docker-compose.dev.yml up -d
-```
 
-**Step 2 — Start Spring Boot backend**
-```bash
+# Step 2 — backend
 cd backend
-
-# Set environment variables (or export them)
 export DB_HOST=localhost DB_PORT=5432 DB_NAME=shopapp
 export DB_USER=shopuser DB_PASSWORD=shoppass
 export REDIS_HOST=localhost REDIS_PORT=6379
 export JWT_SECRET=shopapp-super-secret-jwt-key-minimum-256-bits-for-hs256-algorithm
 export CORS_ORIGINS=http://localhost:3000
-
 mvn spring-boot:run
-# API available at http://localhost:8080
-```
 
-**Step 3 — Start React frontend**
-```bash
-cd frontend
-npm install
-npm start
-# App available at http://localhost:3000
+# Step 3 — frontend
+cd frontend && npm install && npm start
 ```
 
 ---
@@ -165,8 +231,6 @@ npm start
 |-------|----------------------|-----------|
 | Admin | admin@shopapp.com    | admin123  |
 | User  | user@shopapp.com     | user123   |
-
-These are seeded automatically on first startup by `DataInitializer.java`.
 
 ---
 
@@ -191,21 +255,21 @@ These are seeded automatically on first startup by `DataInitializer.java`.
 | DELETE | /api/admin/products/:id      | ADMIN    | Soft-delete product      |
 
 ### Cart
-| Method | Endpoint             | Auth     | Description         |
-|--------|----------------------|----------|---------------------|
-| GET    | /api/cart            | User     | Get cart summary    |
-| POST   | /api/cart            | User     | Add item            |
-| PUT    | /api/cart/:itemId    | User     | Update quantity     |
-| DELETE | /api/cart/:itemId    | User     | Remove item         |
-| DELETE | /api/cart            | User     | Clear cart          |
+| Method | Endpoint             | Auth | Description         |
+|--------|----------------------|------|---------------------|
+| GET    | /api/cart            | User | Get cart summary    |
+| POST   | /api/cart            | User | Add item            |
+| PUT    | /api/cart/:itemId    | User | Update quantity     |
+| DELETE | /api/cart/:itemId    | User | Remove item         |
+| DELETE | /api/cart            | User | Clear cart          |
 
 ### Orders
-| Method | Endpoint                         | Auth     | Description       |
-|--------|----------------------------------|----------|-------------------|
-| POST   | /api/orders                      | User     | Place order       |
-| GET    | /api/orders                      | User     | My orders         |
-| GET    | /api/orders/:orderNumber         | User     | Order detail      |
-| PUT    | /api/orders/admin/:id/status     | ADMIN    | Update status     |
+| Method | Endpoint                         | Auth  | Description       |
+|--------|----------------------------------|-------|-------------------|
+| POST   | /api/orders                      | User  | Place order       |
+| GET    | /api/orders                      | User  | My orders         |
+| GET    | /api/orders/:orderNumber         | User  | Order detail      |
+| PUT    | /api/orders/admin/:id/status     | ADMIN | Update status     |
 
 ### Addresses
 | Method | Endpoint              | Auth | Description      |
@@ -223,86 +287,54 @@ These are seeded automatically on first startup by `DataInitializer.java`.
 
 **Backend** (`backend/Dockerfile`)
 1. **Stage `builder`** — `maven:3.9.5-eclipse-temurin-17`: compiles and packages JAR
-2. **Stage `runtime`** — `eclipse-temurin:17-jre-alpine`: minimal JRE, runs app as non-root user
+2. **Stage `runtime`** — `eclipse-temurin:17-jre-alpine`: minimal JRE, non-root user
 
 **Frontend** (`frontend/Dockerfile`)
-1. **Stage `builder`** — `node:20-alpine`: installs dependencies, runs `npm run build`
-2. **Stage `runtime`** — `nginx:1.25-alpine`: serves static build, proxies `/api/*` to backend
+1. **Stage `builder`** — `node:20-alpine`: installs deps, runs `npm run build`
+2. **Stage `runtime`** — `nginx:1.25-alpine`: serves static build, proxies `/api/*`
 
 ### Services in `docker-compose.yml`
-| Service    | Image / Build     | Port  | Role                        |
-|------------|-------------------|-------|-----------------------------|
-| `postgres`  | postgres:16-alpine | 5432  | Primary database            |
-| `redis`     | redis:7-alpine     | 6379  | Cache + session store       |
-| `backend`   | ./backend/         | 8080  | Spring Boot REST API        |
-| `frontend`  | ./frontend/        | 80    | Nginx + React SPA           |
-
-All services are on a shared `shopapp-network` bridge network.  
-Health checks ensure proper startup order: `postgres → redis → backend → frontend`.
+| Service   | Port | Role                  |
+|-----------|------|-----------------------|
+| postgres  | 5432 | Primary database      |
+| redis     | 6379 | Cache + session store |
+| backend   | 8080 | Spring Boot REST API  |
+| frontend  | 80   | Nginx + React SPA     |
 
 ---
 
 ## ⚙️ Environment Variables
 
-### Backend
-| Variable        | Default                    | Description              |
-|-----------------|----------------------------|--------------------------|
-| DB_HOST         | localhost                  | PostgreSQL host          |
-| DB_PORT         | 5432                       | PostgreSQL port          |
-| DB_NAME         | shopapp                    | Database name            |
-| DB_USER         | shopuser                   | DB username              |
-| DB_PASSWORD     | shoppass                   | DB password              |
-| REDIS_HOST      | localhost                  | Redis host               |
-| REDIS_PORT      | 6379                       | Redis port               |
-| JWT_SECRET      | (see docker-compose.yml)   | JWT signing key (256bit) |
-| CORS_ORIGINS    | http://localhost:3000      | Allowed CORS origins     |
+| Variable     | Default       | Description          |
+|--------------|---------------|----------------------|
+| DB_HOST      | localhost     | PostgreSQL host      |
+| DB_PORT      | 5432          | PostgreSQL port      |
+| DB_NAME      | shopapp       | Database name        |
+| DB_USER      | shopuser      | DB username          |
+| DB_PASSWORD  | shoppass      | DB password          |
+| REDIS_HOST   | localhost     | Redis host           |
+| REDIS_PORT   | 6379          | Redis port           |
+| JWT_SECRET   | (see compose) | JWT signing key      |
+| CORS_ORIGINS | localhost:3000 | Allowed CORS origins |
 
 ---
 
-## 🛑 Stopping & Cleanup
+## 🛑 Cleanup
 
 ```bash
-# Stop all services
-docker compose down
-
-# Stop and remove volumes (wipes all data)
-docker compose down -v
-
-# Remove built images
-docker compose down --rmi all
-```
-
----
-
-## 🧪 Useful Commands
-
-```bash
-# View logs for a specific service
-docker compose logs -f backend
-docker compose logs -f frontend
-
-# Rebuild a single service
-docker compose up --build backend
-
-# Open a shell in the backend container
-docker compose exec backend sh
-
-# Connect to PostgreSQL
-docker compose exec postgres psql -U shopuser -d shopapp
-
-# Connect to Redis
-docker compose exec redis redis-cli
+docker compose down          # Stop
+docker compose down -v       # Stop + wipe data
+docker compose down --rmi all # Stop + remove images
 ```
 
 ---
 
 ## 📝 Notes
 
-- The database schema is auto-created by Hibernate (`ddl-auto: update`) on first run.
-- Product and user seed data is inserted by `DataInitializer.java` only if the tables are empty.
-- Product images use [Unsplash](https://unsplash.com) URLs; replace with your own CDN in production.
-- Redis cache TTL is set to 10 minutes for product listings.
-- For production, change `JWT_SECRET`, `DB_PASSWORD`, and disable `show-sql`.
+- Schema is auto-created by Hibernate on first run.
+- Seed data (users + products) is inserted by `DataInitializer.java` if tables are empty.
+- Redis cache TTL is 10 minutes for product listings.
+- For production: rotate `JWT_SECRET`, `DB_PASSWORD`, disable `show-sql`.
 
 ---
 
@@ -312,23 +344,9 @@ MIT — free to use and modify.
 
 ---
 
-We welcome contributions to improve this project!
+## How to Contribute
 
-### How to Contribute
-
-1. Fork the repository
-2. Clone your fork
-   git clone https://github.com/bumesh7/shopify-app.git
-
-3. Create a new branch
-   git checkout -b feature/your-feature-name
-
-4. Make your changes
-
-5. Commit your changes
-   git commit -m "Add: your feature description"
-
-6. Push to your fork
-   git push origin feature/your-feature-name
-
-7. Open a Pull Request
+1. Fork → clone → `git checkout -b feature/your-feature`
+2. Make changes → `git commit -m "Add: description"`
+3. `git push origin feature/your-feature`
+4. Open a Pull Request — the PR pipeline runs automatically
