@@ -83,14 +83,13 @@ jobs:
         env:
           CI: true
 
-      # ── Set output ─────────────────────────────────────────────────────────────
+      # ── Post-test Evaluation ──────────────────────────────────────────────────
       - name: Determine test result
         id: set-result
         run: |
           BACKEND_RESULT="${{ steps.backend-test.conclusion }}"
-          FRONTEND_RESULT="${{ steps.frontend-test.conslusion }}"
-
-          if [[ "${{ inputs.run_tests }}" == "true" ]]; then
+          FRONTEND_RESULT="${{ steps.frontend-test.conclusion }}"
+          if [[ "${{ inputs.run_tests }}" == "false" ]]; then
             echo "test_result=skipped" >> "$GITHUB_OUTPUT"
             echo "Tests skipped (run_tests=false)"
           elif [[ "$BACKEND_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" ]]; then
@@ -101,3 +100,4 @@ jobs:
             echo "test_result=passed" >> "$GITHUB_OUTPUT"
             echo "All tests passed"
           fi
+

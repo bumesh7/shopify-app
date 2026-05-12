@@ -2,7 +2,7 @@ name: Scheduled Health Check
 
 on:
   schedule:
-    - cron: "0 */12 * * *"   # Every 12 hours
+    - cron: "0 */12 * * *"
   workflow_dispatch:
 
 permissions:
@@ -20,18 +20,16 @@ jobs:
       FRONTEND_PORT:  "8081"
 
     steps:
-      # ── Pull Images ─────────────────────────────────────────────
       - name: Pull backend image
         run: docker pull "$BACKEND_IMAGE"
 
       - name: Pull frontend image
         run: docker pull "$FRONTEND_IMAGE"
 
-      # ── Network ─────────────────────────────────────────────────
       - name: Create network
         run: docker network create hc-net
 
-      # ── Start dependencies (Postgres + Redis) ───────────────────
+      # ── Start Postgres and wait until ready ─────────────────────
       - name: Start Postgres
         run: |
           docker run -d --name postgres \
@@ -41,11 +39,36 @@ jobs:
             -e POSTGRES_PASSWORD=shoppass \
             postgres:15
 
+      - name: Wait for Postgres to be ready
+        run: |
+          echo "Waiting for Postgres..."
+          for i in $(seq 1 20); do
+            if docker exec postgres pg_isready -U shopuser -d shopapp > /dev/null 2>&1; then
+              echo "Postgres is ready after $((i*3))s"
+              break
+            fi
+            echo "Attempt $i/20 - Postgres not ready"
+            sleep 3
+          done
+
+      # ── Start Redis and wait until ready ────────────────────────
       - name: Start Redis
         run: |
           docker run -d --name redis \
             --network hc-net \
             redis:7
+
+      - name: Wait for Redis to be ready
+        run: |
+          echo "Waiting for Redis..."
+          for i in $(seq 1 10); do
+            if docker exec redis redis-cli ping | grep -q PONG; then
+              echo "Redis is ready"
+              break
+            fi
+            echo "Attempt $i/10 - Redis not ready"
+            sleep 2
+          done
 
       # ── Backend ─────────────────────────────────────────────────
       - name: Start backend container
@@ -64,17 +87,19 @@ jobs:
             -e JWT_SECRET=health-check-dummy-secret-32-chars-min \
             "$BACKEND_IMAGE"
 
-      - name: Wait for backend (60s max)
+      - name: Wait for backend (90s max)
         id: backend-health
         run: |
           STATUS="FAILED"
-          for i in $(seq 1 12); do
+          for i in $(seq 1 18); do
             sleep 5
-            if curl -sf "http://localhost:${BACKEND_PORT}/actuator/health" > /dev/null; then
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+              "http://localhost:${BACKEND_PORT}/actuator/health" || echo "000")
+            echo "Attempt $i/18 - HTTP $HTTP"
+            if [[ "$HTTP" == "200" ]]; then
               STATUS="PASSED"
               break
             fi
-            echo "Attempt $i/12 - backend not ready"
           done
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "Backend: $STATUS"
@@ -93,16 +118,22 @@ jobs:
           STATUS="FAILED"
           for i in $(seq 1 8); do
             sleep 5
-            if curl -sf "http://localhost:${FRONTEND_PORT}" > /dev/null; then
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+              "http://localhost:${FRONTEND_PORT}" || echo "000")
+            echo "Attempt $i/8 - HTTP $HTTP"
+            if [[ "$HTTP" == "200" ]]; then
               STATUS="PASSED"
               break
             fi
-            echo "Attempt $i/8 - frontend not ready"
           done
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "Frontend: $STATUS"
 
-      # ── Debug logs (VERY IMPORTANT) ─────────────────────────────
+      # ── Debug logs ──────────────────────────────────────────────
+      - name: Show postgres logs
+        if: always()
+        run: docker logs postgres || true
+
       - name: Show backend logs
         if: always()
         run: docker logs hc-backend || true
@@ -111,33 +142,30 @@ jobs:
         if: always()
         run: docker logs hc-frontend || true
 
-      # ── Cleanup ────────────────────────────────────────────────
+      # ── Cleanup ─────────────────────────────────────────────────
       - name: Cleanup containers
         if: always()
         run: |
           docker stop hc-backend hc-frontend postgres redis 2>/dev/null || true
-          docker rm hc-backend hc-frontend postgres redis 2>/dev/null || true
+          docker rm  hc-backend hc-frontend postgres redis 2>/dev/null || true
           docker network rm hc-net 2>/dev/null || true
 
-      # ── Summary ────────────────────────────────────────────────
+      # ── Summary ─────────────────────────────────────────────────
       - name: Write report
         if: always()
         run: |
           B="${{ steps.backend-health.outputs.status }}"
           F="${{ steps.frontend-health.outputs.status }}"
-
           [[ "$B" == "PASSED" ]] && BI="✅" || BI="❌"
           [[ "$F" == "PASSED" ]] && FI="✅" || FI="❌"
-
           echo "## 🩺 Health Check Report" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Backend | $BI $B |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend | $FI $F |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Checked: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Status |"        >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|"         >> $GITHUB_STEP_SUMMARY
+          echo "| Backend  | $BI $B |"       >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | $FI $F |"       >> $GITHUB_STEP_SUMMARY
+          echo ""                            >> $GITHUB_STEP_SUMMARY
+          echo "- Checked: $(date -u)"       >> $GITHUB_STEP_SUMMARY
 
-      # ── Final fail condition ───────────────────────────────────
       - name: Fail if unhealthy
         if: |
           steps.backend-health.outputs.status == 'FAILED' ||
