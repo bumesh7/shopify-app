@@ -29,7 +29,7 @@ jobs:
       - name: Create network
         run: docker network create hc-net
 
-      # ── Start Postgres and wait until ready ─────────────────────
+      # ── Start Postgres and wait until ready ──��──────────────────
       - name: Start Postgres
         run: |
           docker run -d --name postgres \
@@ -77,6 +77,8 @@ jobs:
             --network hc-net \
             -p "$BACKEND_PORT:8080" \
             -e SPRING_PROFILES_ACTIVE=default \
+            -e MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health \
+            -e MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS=always \
             -e DB_HOST=postgres \
             -e DB_PORT=5432 \
             -e DB_NAME=shopapp \
@@ -101,6 +103,13 @@ jobs:
               break
             fi
           done
+          if [[ "$STATUS" == "FAILED" ]]; then
+            echo "❌ Backend health check failed. Container logs:"
+            docker logs hc-backend || true
+            echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+            echo "Backend: $STATUS"
+            exit 1
+          fi
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "Backend: $STATUS"
 
@@ -126,6 +135,13 @@ jobs:
               break
             fi
           done
+          if [[ "$STATUS" == "FAILED" ]]; then
+            echo "❌ Frontend health check failed. Container logs:"
+            docker logs hc-frontend || true
+            echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+            echo "Frontend: $STATUS"
+            exit 1
+          fi
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "Frontend: $STATUS"
 
