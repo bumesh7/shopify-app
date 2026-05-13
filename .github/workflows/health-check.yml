@@ -29,7 +29,7 @@ jobs:
       - name: Create network
         run: docker network create hc-net
 
-      # ── Start Postgres and wait until ready ─────────────────────
+      # ── Postgres ────────────────────────────────────────────────
       - name: Start Postgres
         run: |
           docker run -d --name postgres \
@@ -51,7 +51,7 @@ jobs:
             sleep 3
           done
 
-      # ── Start Redis and wait until ready ────────────────────────
+      # ── Redis ───────────────────────────────────────────────────
       - name: Start Redis
         run: |
           docker run -d --name redis \
@@ -71,9 +71,10 @@ jobs:
           done
 
       # ── Backend ─────────────────────────────────────────────────
+      # Container named "backend" to match nginx upstream in frontend config
       - name: Start backend container
         run: |
-          docker run -d --name hc-backend \
+          docker run -d --name backend \
             --network hc-net \
             -p "$BACKEND_PORT:8080" \
             -e SPRING_PROFILES_ACTIVE=default \
@@ -89,7 +90,6 @@ jobs:
             -e JWT_SECRET=health-check-dummy-secret-32-chars-min \
             "$BACKEND_IMAGE"
 
-      # Key fix: accept 200/401/403 as "app is up"; only 000/502/503 mean down
       - name: Wait for backend (90s max)
         id: backend-health
         run: |
@@ -109,6 +109,7 @@ jobs:
           echo "Backend: $STATUS"
 
       # ── Frontend ────────────────────────────────────────────────
+      # Started AFTER backend is confirmed up, so nginx upstream resolves correctly
       - name: Start frontend container
         run: |
           docker run -d --name hc-frontend \
@@ -134,14 +135,14 @@ jobs:
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "Frontend: $STATUS"
 
-      # ── Debug logs (always) ─────────────────────────────────────
+      # ── Debug logs ──────────────────────────────────────────────
       - name: Show postgres logs
         if: always()
         run: docker logs postgres || true
 
       - name: Show backend logs
         if: always()
-        run: docker logs hc-backend || true
+        run: docker logs backend || true
 
       - name: Show frontend logs
         if: always()
@@ -151,8 +152,8 @@ jobs:
       - name: Cleanup containers
         if: always()
         run: |
-          docker stop hc-backend hc-frontend postgres redis 2>/dev/null || true
-          docker rm  hc-backend hc-frontend postgres redis 2>/dev/null || true
+          docker stop backend hc-frontend postgres redis 2>/dev/null || true
+          docker rm  backend hc-frontend postgres redis 2>/dev/null || true
           docker network rm hc-net 2>/dev/null || true
 
       # ── Summary ─────────────────────────────────────────────────
@@ -163,13 +164,13 @@ jobs:
           F="${{ steps.frontend-health.outputs.status }}"
           [[ "$B" == "PASSED" ]] && BI="✅" || BI="❌"
           [[ "$F" == "PASSED" ]] && FI="✅" || FI="❌"
-          echo "## 🩺 Health Check Report"            >> $GITHUB_STEP_SUMMARY
-          echo "| Service  | Status |"                >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|"                >> $GITHUB_STEP_SUMMARY
-          echo "| Backend  | $BI $B |"                >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend | $FI $F |"                >> $GITHUB_STEP_SUMMARY
-          echo ""                                     >> $GITHUB_STEP_SUMMARY
-          echo "- Checked: $(date -u)"                >> $GITHUB_STEP_SUMMARY
+          echo "## 🩺 Health Check Report"  >> $GITHUB_STEP_SUMMARY
+          echo "| Service  | Status |"       >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|"       >> $GITHUB_STEP_SUMMARY
+          echo "| Backend  | $BI $B |"       >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | $FI $F |"       >> $GITHUB_STEP_SUMMARY
+          echo ""                            >> $GITHUB_STEP_SUMMARY
+          echo "- Checked: $(date -u)"       >> $GITHUB_STEP_SUMMARY
 
       # ── Final fail condition ─────────────────────────────────────
       - name: Fail if unhealthy
